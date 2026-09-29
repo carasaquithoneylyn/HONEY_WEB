@@ -1,0 +1,198 @@
+=======================================================================
+ABADIES SOLUTIONS - SYSTEM FLOW NOTES
+Student and Alumni Records Management System (v3.0.5)
+Stack: PHP 8 + PDO / MariaDB, AdminLTE 3, Bootstrap 4, DataTables, SweetAlert2
+Database: abadies_db
+=======================================================================
+
+
+-----------------------------------------------------------------------
+0. BIG PICTURE
+-----------------------------------------------------------------------
+Every page (except login.php and the printable SOA) is built the same way:
+
+    module/<name>/index.php
+        -> require ../../include/initialize.php   (config, db, session, helpers)
+        -> set $title and $content
+        -> require ../../theme/template.php
+               template.php draws the shell:
+                 header.php  (top navbar + user menu + dark toggle + logout)
+                 sidebar.php (left menu)
+                 then require $content  (the page body, e.g. list.php)
+
+initialize.php creates a single $mydb (PDO wrapper, class Database) that
+every page and helper uses. WEB_ROOT auto-detects whether you opened the
+site as http://localhost/abadies-class/ or http://abadies-class.local/ so all
+links work either way with no code change.
+
+
+-----------------------------------------------------------------------
+1. LOGIN / LOGOUT FLOW
+-----------------------------------------------------------------------
+LOGIN  (login.php)
+  1. User submits username + password.
+  2. Password is sha1()-hashed, then User::AuthenticateUser() checks
+     tblusers WHERE USERNAME + PASSWORD + STATUSACTIVE = 1.
+  3. On success the session is filled (UID, DISPLAYNAME, USERNAME, TYPE)
+     and the browser is sent to index.php (the dashboard).
+  4. On failure a SweetAlert error is shown and the user stays on login.
+  Default account:  abadies / abadies
+
+SESSION GUARD
+  Every protected page calls initialize.php -> session.php. template.php
+  and each module redirect to login.php when $_SESSION['UID'] is not set.
+
+LOGOUT  (header.php -> logout.php)
+  1. The "Logout" link in the top-right user menu now opens a SweetAlert2
+     confirmation ("Log out?"). "Stay signed in" cancels.
+  2. On confirm it shows a "Signing out..." loader and goes to logout.php.
+  3. logout.php unsets the session keys and redirects to
+     login.php?logout=1, which shows a "Signed out" toast.
+
+
+-----------------------------------------------------------------------
+2. DARK MODE (now working)
+-----------------------------------------------------------------------
+  - The toggle (moon/sun icon, top-right in header.php) adds or removes the
+    class "dark-mode-custom" on the <html> element and remembers the choice
+    in localStorage ('abadiesTheme').
+  - template.php also applies the saved choice BEFORE paint, so there is no
+    flash of the wrong theme on reload.
+  - All the colour rules live in custom.css (selectors: html.dark-mode-custom ...).
+
+  WHY IT WAS BROKEN: template.php was loading "theme/custom.css", but the
+  file actually sits at the project root as "custom.css", so the stylesheet
+  (and all its dark-mode rules) 404'd and never loaded. Fixed by pointing
+  the <link> at WEB_ROOT.'custom.css'. Dark mode now applies across the
+  dashboard, tables, cards, modals and sidebar.
+
+  NOTE: the Login page and the printable Statement of Account are standalone
+  documents and intentionally stay light (the SOA is meant for printing).
+
+
+-----------------------------------------------------------------------
+3. SIDEBAR MAP  (theme/sidebar.php)
+-----------------------------------------------------------------------
+  Dashboard
+  Alumni Details        (generic module -> alumni_details)
+  Student
+  Course
+  Subject
+  School Year           (generic -> tblschoolyear)
+  Sections              (generic -> tblsections)
+  Enrollment
+  Cashier   (dropdown)
+      - Statement of Account   -> module/cashier
+      - Payments               -> module/payments
+      - Fee Setup              -> generic -> tblfeeitems
+  Attendance (dropdown: Scan Kiosk, Attendance Report)
+  Enrollment Details    (generic -> tblenrollment_details)
+  Grades                (generic -> tblgrades)
+  About
+  Account Settings (dropdown: Manage Users, Manage User Type)
+
+
+-----------------------------------------------------------------------
+4. ENROLLMENT FLOW  (two stages)
+-----------------------------------------------------------------------
+  STAGE 1 - RESERVE  (done from the Student module)
+     module/student/controller.php inserts a tblenrollment row:
+        STATUS = 'Registered', DATE_RESERVED set, SECTION_ID = NULL,
+        DATE_ENROLLED = NULL.
+     A DB unique key (S_ID, SY_ID, SEMESTER) stops the same student being
+     registered twice for the same term.
+
+  STAGE 2 - SECTIONING  (Enrollment module)
+     module/enrollment/controller.php (action=section):
+        - validates the chosen section really belongs to the record's
+          course + school year,
+        - REQUIRES that an 'Admission Fee' payment already exists for this
+          enrolment (collected in Payments) before sectioning is allowed,
+        - sets SECTION_ID, stamps DATE_ENROLLED, moves STATUS to 'Enrolled'.
+
+  Statuses seen in the list: Registered -> Enrolled (also Dropped / Completed).
+  Edit and Delete are also in the Enrollment module; deleting an enrolment
+  cascades to its tblenrollment_details and tblgrades rows.
+
+
+-----------------------------------------------------------------------
+5. CASHIER FLOW  (Fee Setup -> Statement of Account -> Payments)
+   *** These three now reconcile to the SAME figures. ***
+-----------------------------------------------------------------------
+  STEP A - FEE SETUP        (Cashier > Fee Setup ; table tblfeeitems)
+     One row per fee, per YEAR_LEVEL, grouped by CATEGORY:
+        TUITION      -> the tuition line (fallback if no tblfeeschedule row)
+        STANDARD     -> Standard School Fees section
+        NONSTANDARD  -> Non-Standard School Fees section
+        OTHER        -> printed after the sub-totals (e.g. Love Gift)
+     Edit the AMOUNT figures here. An amount of 0.00 still prints its label
+     with a blank figure (like the paper form).
+
+  STEP B - STATEMENT OF ACCOUNT   (Cashier > Statement of Account)
+     module/cashier/index.php lists enrolment records; each opens
+     module/cashier/soa.php?eid=<ENROLLMENT_ID> in a new tab.
+     The SOA computes:
+        Tuition      = tblfeeschedule (COURSE_ID + YEAR_LEVEL), or the
+                       TUITION items in Fee Setup if no schedule row.
+        + STANDARD + NONSTANDARD + OTHER items (Fee Setup, by year level)
+        = TOTAL ASSESSMENT  (the paper form's "TOTAL FEES")
+        Less: Payments (sum of all tblpayments for this enrolment)
+        = BALANCE DUE
+     The SOA is a clean, print-optimised document (Print button, A4).
+
+  STEP C - PAYMENTS          (Cashier > Payments ; table tblpayments)
+     module/payments/ - record a payment against an enrolment.
+     The Add Payment info panel now shows Total Assessment / Total Paid /
+     Balance Due computed the EXACT same way as the SOA (module/payments/
+     ajax.php act='balance'), plus a "View full Statement of Account" link.
+     Fee types: Enrollment Fee (variable), Entrance Exam (P150, 1st Year
+     only), Admission Fee (P30). Entrance Exam / Admission amounts are fixed
+     and re-checked server-side in controller.php, not trusted from the form.
+
+  THE CHAIN:
+     Set amounts in FEE SETUP  ->  they appear on the STATEMENT OF ACCOUNT
+     ->  PAYMENTS collects against that same assessment and balance.
+     Change a fee in Fee Setup and both the SOA and the Payments balance
+     update together.
+
+
+-----------------------------------------------------------------------
+6. GENERIC MODULE  (module/generic)
+-----------------------------------------------------------------------
+  A single engine that auto-builds a DataTable list + Add/Edit/Delete forms
+  for any WHITELISTED table (module/generic/config.php). Columns and inputs
+  are read live from the database (include/generic.php). Foreign-key columns
+  become dropdowns via $GENERIC_FK_MAP; some columns become fixed dropdowns
+  via $GENERIC_FIELD_CHOICES (YEAR_LEVEL, SEMESTER, STATUS, CATEGORY, ...).
+  Only whitelisted table names are accepted (?t=...), so the URL cannot point
+  it at an arbitrary table.
+
+
+-----------------------------------------------------------------------
+7. KEY TABLES
+-----------------------------------------------------------------------
+  tblusers, tblusertype          - accounts + roles (login)
+  tblstudent                     - student master
+  tblcourses, tblsubjects        - programs + subjects
+  tblschoolyear, tblsections     - terms + sections
+  tblenrollment                  - one row per student per term (2-stage)
+  tblenrollment_details, tblgrades - subjects + grades under an enrolment
+  tblfeeschedule                 - tuition per course + year level
+  tblfeeitems                    - itemised SOA fees (Fee Setup)   [cashier]
+  tblpayments                    - payment records                 [cashier]
+  alumni_details                 - alumni records
+
+
+-----------------------------------------------------------------------
+8. INSTALL RECAP
+-----------------------------------------------------------------------
+  1. Put the abadies-class folder in C:\xampp\htdocs\
+  2. Start Apache + MySQL (XAMPP).
+  3. phpMyAdmin > Import > database/abadies_db.sql  (creates abadies_db and all
+     tables INCLUDING tblfeeitems, already seeded for the SOA).
+  4. Open http://localhost/abadies-class/  (or set up the vhost in setup/).
+  5. Log in with abadies / abadies.
+
+=======================================================================
+END OF NOTES
+=======================================================================

@@ -1,0 +1,59 @@
+=======================================================================
+ABADIES SOLUTIONS - Windows hosts file
+=======================================================================
+
+File to edit on your machine:
+
+    C:\Windows\System32\drivers\etc\hosts
+
+This file has NO extension. It will not open by double-clicking.
+
+HOW TO OPEN IT
+--------------
+1. Press the Windows key, type: notepad
+2. Right-click Notepad, choose "Run as administrator", click Yes.
+   (If you skip this step Windows will refuse to save the file.)
+3. In Notepad: File > Open
+4. Paste this into the File name box and press Enter:
+
+       C:\Windows\System32\drivers\etc\hosts
+
+   If you see nothing in the folder, change the file-type dropdown at
+   the bottom right from "Text Documents (*.txt)" to "All Files (*.*)".
+
+5. Scroll to the very bottom and paste the block below.
+6. File > Save. Close Notepad.
+
+
+PASTE THIS AT THE BOTTOM
+------------------------
+
+# ABADIES SOLUTIONS - local development
+127.0.0.1       abadies-class.local
+127.0.0.1       www.abadies-class.local
+
+
+NOTES
+-----
+* Use a TAB or spaces between the IP and the name, both work.
+* Do not use 'localhost' as the name, that one already exists.
+* Do not add http:// here. Just the name.
+* Windows may cache the old lookup. If the site does not resolve,
+  open Command Prompt as administrator and run:
+
+      ipconfig /flushdns
+
+* If Notepad still refuses to save, your antivirus is probably locking
+  the hosts file. Turn off its "protected folders" or "tamper
+  protection" option, save, then turn it back on.
+
+
+AFTER THIS
+----------
+Restart Apache in the XAMPP Control Panel, then open:
+
+    http://abadies-class.local/
+
+If Apache refuses to start, something else is already using port 80.
+Usually that is Skype, IIS, or another web server. Check the XAMPP
+Control Panel log for the exact message.
